@@ -58,6 +58,11 @@ namespace CustomLogic
         /// </summary>
         private Stack<(string className, string methodName, CustomLogicSourceType? ns)> _executionStack = new Stack<(string, string, CustomLogicSourceType?)>();
 
+        /// <summary>
+        /// Current recursion depth (used for preventing stack overflow attacks).
+        /// </summary>
+        private int _recursionDepth = 0;
+
         public CustomLogicEvaluator(CustomLogicStartAst start, CustomLogicCompiler compiler = null)
         {
             _start = start;
@@ -228,8 +233,32 @@ namespace CustomLogic
                     }
                     else if ((int)conditional.Token.Value == (int)CustomLogicSymbol.While)
                     {
+                        // Security: Limit loop iterations to prevent infinite loop attacks
+                        int loopIterations = 0;
                         while ((bool)EvaluateExpression(classInstance, localVariables, conditional.Condition))
                         {
+                            loopIterations++;
+                            if (loopIterations > CustomLogicSecurityLimits.MaxLoopIterations)
+                            {
+                                string errorMessage = $"Maximum loop iterations ({CustomLogicSecurityLimits.MaxLoopIterations}) exceeded in while loop";
+                                if (CaptureErrors)
+                                {
+                                    CapturedErrors.Add(new CustomLogicError(
+                                        errorMessage,
+                                        classInstance.ClassName,
+                                        "while loop",
+                                        conditional.Token.Line,
+                                        "",
+                                        classInstance.Namespace
+                                    ));
+                                }
+                                else
+                                {
+                                    LogCustomLogicError("Custom logic security error: " + errorMessage, true);
+                                }
+                                yield break;
+                            }
+                            
                             var cwd = new CoroutineWithData(CustomLogicManager._instance, EvaluateBlockCoroutine(classInstance, localVariables, conditional.Statements));
                             yield return cwd.Coroutine;
                             yield return cwd.Result;
@@ -274,7 +303,31 @@ namespace CustomLogic
                 else if (statement is CustomLogicForBlockAst)
                 {
                     CustomLogicForBlockAst forBlock = (CustomLogicForBlockAst)statement;
-                    foreach (object variable in ((CustomLogicListBuiltin)EvaluateExpression(classInstance, localVariables, forBlock.Iterable)).List)
+                    var iterable = ((CustomLogicListBuiltin)EvaluateExpression(classInstance, localVariables, forBlock.Iterable)).List;
+                    
+                    // Security: Limit collection size to prevent performance degradation
+                    if (iterable.Count > CustomLogicSecurityLimits.MaxCollectionSize)
+                    {
+                        string errorMessage = $"Collection size ({iterable.Count}) exceeds maximum allowed ({CustomLogicSecurityLimits.MaxCollectionSize}) in for loop";
+                        if (CaptureErrors)
+                        {
+                            CapturedErrors.Add(new CustomLogicError(
+                                errorMessage,
+                                classInstance.ClassName,
+                                "for loop",
+                                forBlock.Token.Line,
+                                "",
+                                classInstance.Namespace
+                            ));
+                        }
+                        else
+                        {
+                            LogCustomLogicError("Custom logic security error: " + errorMessage, true);
+                        }
+                        yield break;
+                    }
+                    
+                    foreach (object variable in iterable)
                     {
                         string variableName = forBlock.Variable.Name;
                         if (localVariables.ContainsKey(variableName))
@@ -349,8 +402,32 @@ namespace CustomLogic
                     }
                     else if ((int)conditional.Token.Value == (int)CustomLogicSymbol.While)
                     {
+                        // Security: Limit loop iterations to prevent infinite loop attacks
+                        int loopIterations = 0;
                         while ((bool)EvaluateExpression(classInstance, localVariables, conditional.Condition))
                         {
+                            loopIterations++;
+                            if (loopIterations > CustomLogicSecurityLimits.MaxLoopIterations)
+                            {
+                                string errorMessage = $"Maximum loop iterations ({CustomLogicSecurityLimits.MaxLoopIterations}) exceeded in while loop";
+                                if (CaptureErrors)
+                                {
+                                    CapturedErrors.Add(new CustomLogicError(
+                                        errorMessage,
+                                        classInstance.ClassName,
+                                        "while loop",
+                                        conditional.Token.Line,
+                                        "",
+                                        classInstance.Namespace
+                                    ));
+                                }
+                                else
+                                {
+                                    LogCustomLogicError("Custom logic security error: " + errorMessage, true);
+                                }
+                                break;
+                            }
+                            
                             bool nextIter = EvaluateBlock(classInstance, localVariables, conditional.Statements, out object nextResult);
                             if (nextIter)
                             {
@@ -419,7 +496,31 @@ namespace CustomLogic
                 else if (statement is CustomLogicForBlockAst)
                 {
                     CustomLogicForBlockAst forBlock = (CustomLogicForBlockAst)statement;
-                    foreach (object variable in ((CustomLogicListBuiltin)EvaluateExpression(classInstance, localVariables, forBlock.Iterable)).List)
+                    var iterable = ((CustomLogicListBuiltin)EvaluateExpression(classInstance, localVariables, forBlock.Iterable)).List;
+                    
+                    // Security: Limit collection size to prevent performance degradation
+                    if (iterable.Count > CustomLogicSecurityLimits.MaxCollectionSize)
+                    {
+                        string errorMessage = $"Collection size ({iterable.Count}) exceeds maximum allowed ({CustomLogicSecurityLimits.MaxCollectionSize}) in for loop";
+                        if (CaptureErrors)
+                        {
+                            CapturedErrors.Add(new CustomLogicError(
+                                errorMessage,
+                                classInstance.ClassName,
+                                "for loop",
+                                forBlock.Token.Line,
+                                "",
+                                classInstance.Namespace
+                            ));
+                        }
+                        else
+                        {
+                            LogCustomLogicError("Custom logic security error: " + errorMessage, true);
+                        }
+                        return iter;
+                    }
+                    
+                    foreach (object variable in iterable)
                     {
                         string variableName = forBlock.Variable.Name;
                         if (localVariables.ContainsKey(variableName))
@@ -535,6 +636,31 @@ namespace CustomLogic
         {
             if (parameterValues == null)
                 parameterValues = EmptyArgs;
+            
+            // Security: Check recursion depth to prevent stack overflow attacks
+            _recursionDepth++;
+            if (_recursionDepth > CustomLogicSecurityLimits.MaxRecursionDepth)
+            {
+                _recursionDepth--;
+                string errorMessage = $"Maximum recursion depth ({CustomLogicSecurityLimits.MaxRecursionDepth}) exceeded at method {methodName} in class {classInstance.ClassName}";
+                if (CaptureErrors)
+                {
+                    CapturedErrors.Add(new CustomLogicError(
+                        errorMessage,
+                        classInstance.ClassName,
+                        methodName,
+                        0,
+                        "",
+                        classInstance.Namespace
+                    ));
+                }
+                else
+                {
+                    LogCustomLogicError("Custom logic security error: " + errorMessage, true);
+                }
+                return null;
+            }
+            
             try
             {
                 if (classInstance.TryGetVariable(methodName, out var variable) && variable is CLMethodBinding method)
@@ -650,6 +776,11 @@ namespace CustomLogic
                     LogCustomLogicError(errorMessage, true);
                 }
                 return null;
+            }
+            finally
+            {
+                // Security: Always decrement recursion depth when exiting method
+                _recursionDepth--;
             }
         }
 

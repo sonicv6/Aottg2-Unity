@@ -20,6 +20,12 @@ namespace CustomLogic
         [CLMethod(description: "Loads a json string into a custom logic object")]
         public static object LoadFromString(string json)
         {
+            // Security: Limit JSON size to prevent memory exhaustion attacks
+            if (json.Length > CustomLogicSecurityLimits.MaxJsonSize)
+            {
+                throw new System.Exception($"JSON string size ({json.Length} characters) exceeds maximum allowed ({CustomLogicSecurityLimits.MaxJsonSize} characters).");
+            }
+            
             string jsonTrim = json.Trim();
             JSONNode jsonNode;
             try
@@ -32,7 +38,7 @@ namespace CustomLogic
             }
             try
             {
-                return LoadJSON(jsonNode);
+                return LoadJSON(jsonNode, 0);
             }
             catch
             {
@@ -48,13 +54,19 @@ namespace CustomLogic
             return json.ToString(aIndent: 4);
         }
 
-        protected static object LoadJSON(JSONNode json)
+        protected static object LoadJSON(JSONNode json, int depth)
         {
+            // Security: Limit JSON depth to prevent stack overflow attacks
+            if (depth > CustomLogicSecurityLimits.MaxJsonDepth)
+            {
+                throw new System.Exception($"JSON nesting depth ({depth}) exceeds maximum allowed ({CustomLogicSecurityLimits.MaxJsonDepth}).");
+            }
+            
             if (json.IsArray)
             {
                 var list = new CustomLogicListBuiltin();
                 foreach (var node in json.Values)
-                    list.List.Add(LoadJSON(node));
+                    list.List.Add(LoadJSON(node, depth + 1));
                 return list;
             }
             else if (json.IsObject)
@@ -63,7 +75,7 @@ namespace CustomLogic
                 foreach (string key in json.Keys)
                 {
                     var node = json[key];
-                    dict.Dict.Add(key, LoadJSON(node));
+                    dict.Dict.Add(key, LoadJSON(node, depth + 1));
                 }
                 return dict;
             }

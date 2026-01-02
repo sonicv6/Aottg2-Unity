@@ -17,6 +17,9 @@ namespace CustomLogic
     [CLType(Name = "Network", Static = true, Abstract = true)]
     partial class CustomLogicNetworkBuiltin : BuiltinClassInstance
     {
+        // Security: Track network messages per player for rate limiting
+        private static Dictionary<int, Queue<float>> _networkMessageTimes = new Dictionary<int, Queue<float>>();
+        
         [CLConstructor]
         public CustomLogicNetworkBuiltin()
         {
@@ -54,19 +57,56 @@ namespace CustomLogic
         [CLMethod(Static = true, Description = "Send a message to a player")]
         public void SendMessage(CustomLogicPlayerBuiltin player, string message)
         {
+            // Security: Rate limit network messages to prevent flooding attacks
+            CheckNetworkMessageRateLimit();
             RPCManager.PhotonView.RPC(nameof(RPCManager.SendMessageRPC), player.Player, new object[] { message });
         }
 
         [CLMethod(Static = true, Description = "Send a message to all players")]
         public void SendMessageAll(string message)
         {
+            // Security: Rate limit network messages to prevent flooding attacks
+            CheckNetworkMessageRateLimit();
             RPCManager.PhotonView.RPC(nameof(RPCManager.SendMessageRPC), RpcTarget.All, new object[] { message });
         }
 
         [CLMethod(Static = true, Description = "Send a message to all players except the sender")]
         public void SendMessageOthers(string message)
         {
+            // Security: Rate limit network messages to prevent flooding attacks
+            CheckNetworkMessageRateLimit();
             RPCManager.PhotonView.RPC(nameof(RPCManager.SendMessageRPC), RpcTarget.Others, new object[] { message });
+        }
+        
+        /// <summary>
+        /// Security: Check and enforce rate limits for network messages to prevent flooding.
+        /// </summary>
+        private static void CheckNetworkMessageRateLimit()
+        {
+            int playerId = PhotonNetwork.LocalPlayer.ActorNumber;
+            float currentTime = Time.time;
+            
+            if (!_networkMessageTimes.ContainsKey(playerId))
+            {
+                _networkMessageTimes[playerId] = new Queue<float>();
+            }
+            
+            var messageTimes = _networkMessageTimes[playerId];
+            
+            // Remove messages outside the time window
+            while (messageTimes.Count > 0 && currentTime - messageTimes.Peek() > CustomLogicSecurityLimits.NetworkMessageWindowSeconds)
+            {
+                messageTimes.Dequeue();
+            }
+            
+            // Check if rate limit exceeded
+            if (messageTimes.Count >= CustomLogicSecurityLimits.MaxNetworkMessagesPerWindow)
+            {
+                throw new System.Exception($"Network message rate limit exceeded. Maximum {CustomLogicSecurityLimits.MaxNetworkMessagesPerWindow} messages per {CustomLogicSecurityLimits.NetworkMessageWindowSeconds} seconds allowed.");
+            }
+            
+            // Add current message time
+            messageTimes.Enqueue(currentTime);
         }
 
         [CLMethod(Static = true, Description = "Finds a player in the room by id.")]
