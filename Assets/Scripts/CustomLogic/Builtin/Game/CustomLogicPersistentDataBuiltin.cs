@@ -17,6 +17,9 @@ namespace CustomLogic
     [CLType(Name = "PersistentData", Static = true, Abstract = true)]
     partial class CustomLogicPersistentDataBuiltin : BuiltinClassInstance
     {
+        // Security: Track file operations for rate limiting
+        private static Queue<float> _fileOperationTimes = new Queue<float>();
+        
         [CLConstructor]
         public CustomLogicPersistentDataBuiltin()
         {
@@ -40,6 +43,9 @@ namespace CustomLogic
         [CLMethod(Description = "Loads persistent data from given file name. If encrypted is true, will treat the file as having been saved as encrypted.")]
         public static void LoadFromFile(string fileName, bool encrypted)
         {
+            // Security: Rate limit file operations to prevent file system abuse
+            CheckFileOperationRateLimit();
+            
             Directory.CreateDirectory(FolderPaths.PersistentData);
             CustomLogicManager.PersistentData.Clear();
 
@@ -72,6 +78,9 @@ namespace CustomLogic
         [CLMethod(Description = "Saves current persistent data to given file name. If encrypted is true, will also encrypt the file instead of using plaintext.")]
         public static void SaveToFile(string fileName, bool encrypted)
         {
+            // Security: Rate limit file operations to prevent file system abuse
+            CheckFileOperationRateLimit();
+            
             Directory.CreateDirectory(FolderPaths.PersistentData);
 
             if (!Util.IsValidFileName(fileName))
@@ -98,9 +107,53 @@ namespace CustomLogic
                 text = new SimpleAES().Encrypt(text);
             if (text.Length > (1000 * 1000))
                 throw new System.Exception("PersistentData.SaveToFile exceeded 1 mb limit.");
-            foreach (var fi in new DirectoryInfo(FolderPaths.PersistentData).GetFiles().OrderByDescending(x => x.LastWriteTime).Skip(100))
+            
+            // Security: Check total storage size before writing
+            CheckTotalStorageSize(FolderPaths.PersistentData, text.Length);
+            
+            foreach (var fi in new DirectoryInfo(FolderPaths.PersistentData).GetFiles().OrderByDescending(x => x.LastWriteTime).Skip(CustomLogicSecurityLimits.MaxPersistentDataFiles))
                 fi.Delete();
             File.WriteAllText(path, text);
+        }
+        
+        /// <summary>
+        /// Security: Check and enforce rate limits for file operations.
+        /// </summary>
+        private static void CheckFileOperationRateLimit()
+        {
+            float currentTime = UnityEngine.Time.time;
+            
+            // Remove operations outside the time window
+            while (_fileOperationTimes.Count > 0 && currentTime - _fileOperationTimes.Peek() > CustomLogicSecurityLimits.FileOperationWindowSeconds)
+            {
+                _fileOperationTimes.Dequeue();
+            }
+            
+            // Check if rate limit exceeded
+            if (_fileOperationTimes.Count >= CustomLogicSecurityLimits.MaxFileOperationsPerWindow)
+            {
+                throw new System.Exception($"File operation rate limit exceeded. Maximum {CustomLogicSecurityLimits.MaxFileOperationsPerWindow} operations per {CustomLogicSecurityLimits.FileOperationWindowSeconds} seconds allowed.");
+            }
+            
+            // Add current operation time
+            _fileOperationTimes.Enqueue(currentTime);
+        }
+        
+        /// <summary>
+        /// Security: Check total storage size to prevent disk space exhaustion.
+        /// </summary>
+        private static void CheckTotalStorageSize(string directory, long newFileSize)
+        {
+            long totalSize = 0;
+            foreach (var file in new DirectoryInfo(directory).GetFiles())
+            {
+                totalSize += file.Length;
+            }
+            
+            if (totalSize + newFileSize > CustomLogicSecurityLimits.MaxTotalStorageBytes)
+            {
+                throw new System.Exception($"Total persistent data storage ({totalSize + newFileSize} bytes) would exceed maximum allowed ({CustomLogicSecurityLimits.MaxTotalStorageBytes} bytes).");
+            }
         }
 
         [CLMethod(Description = "Clears current persistent data.")]
