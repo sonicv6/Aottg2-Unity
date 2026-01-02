@@ -25,7 +25,31 @@ namespace CustomLogic
         [CLMethod("Equivalent to C# string.format(string, List<string>).", ParameterTypeArguments = new[] { null, "List<string>" })]
         public static string FormatFromList(string str, CustomLogicListBuiltin list)
         {
-            return string.Format(str, list.List.ToArray());
+            try
+            {
+                // Security: Validate format string to prevent format string vulnerabilities
+                // Check that we don't have more placeholders than arguments
+                int maxPlaceholder = -1;
+                for (int i = 0; i < str.Length - 1; i++)
+                {
+                    if (str[i] == '{' && i + 1 < str.Length && char.IsDigit(str[i + 1]))
+                    {
+                        int placeholder = str[i + 1] - '0';
+                        maxPlaceholder = System.Math.Max(maxPlaceholder, placeholder);
+                    }
+                }
+                
+                if (maxPlaceholder >= list.List.Count)
+                {
+                    throw new System.FormatException($"Format string requires at least {maxPlaceholder + 1} arguments but only {list.List.Count} provided");
+                }
+                
+                return string.Format(str, list.List.ToArray());
+            }
+            catch (System.FormatException ex)
+            {
+                throw new System.Exception("Invalid format string: " + ex.Message);
+            }
         }
 
         [CLMethod(Description = "Split the string into a list. Can pass in either a string to split on or a list of strings to split on, the last optional param can remove all empty entries.", ReturnTypeArguments = new[] { "string" })]

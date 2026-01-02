@@ -401,5 +401,91 @@ class Main
         }
 
         #endregion
+
+        #region Format String Vulnerability Tests
+
+        [Test]
+        public void TestFormatStringWithTooManyPlaceholders()
+        {
+            string script = @"
+class Main
+{
+    function Init()
+    {
+    }
+    
+    function TestFormat()
+    {
+        formatStr = ""{0} {1} {2}"";
+        params = List();
+        params.Add(""a"");
+        return String.FormatFromList(formatStr, params);
+    }
+}";
+
+            var evaluator = new OfflineCustomLogicEvaluator(script);
+            var result = evaluator.EvaluateMainMethod("TestFormat");
+            
+            // Should handle gracefully with error, not crash
+            Assert.IsNull(result);
+            Assert.IsTrue(evaluator.HasErrors());
+            Assert.IsTrue(evaluator.GetCapturedErrors()[0].Message.Contains("format string") || 
+                         evaluator.GetCapturedErrors()[0].Message.Contains("Format string"));
+        }
+
+        [Test]
+        public void TestFormatStringValidUsage()
+        {
+            string script = @"
+class Main
+{
+    function Init()
+    {
+    }
+    
+    function TestFormat()
+    {
+        formatStr = ""Hello {0}, you are {1} years old"";
+        params = List();
+        params.Add(""Alice"");
+        params.Add(""25"");
+        return String.FormatFromList(formatStr, params);
+    }
+}";
+
+            var evaluator = new OfflineCustomLogicEvaluator(script);
+            var result = evaluator.EvaluateMainMethod("TestFormat");
+            
+            Assert.AreEqual("Hello Alice, you are 25 years old", result);
+            Assert.IsFalse(evaluator.HasErrors());
+        }
+
+        [Test]
+        public void TestFormatStringEdgeCase()
+        {
+            string script = @"
+class Main
+{
+    function Init()
+    {
+    }
+    
+    function TestFormat()
+    {
+        formatStr = ""{0}"";
+        params = List();
+        params.Add(""test"");
+        return String.FormatFromList(formatStr, params);
+    }
+}";
+
+            var evaluator = new OfflineCustomLogicEvaluator(script);
+            var result = evaluator.EvaluateMainMethod("TestFormat");
+            
+            Assert.AreEqual("test", result);
+            Assert.IsFalse(evaluator.HasErrors());
+        }
+
+        #endregion
     }
 }
